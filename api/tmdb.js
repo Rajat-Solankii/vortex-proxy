@@ -1,24 +1,22 @@
-export const runtime = 'edge';
+const fetch = require('node-fetch');
 
-export default async function handler(req) {
-  const urlParams = new URL(req.url).searchParams;
-  const path = urlParams.get('path');
+export default async function handler(req, res) {
+  const { path, ...queryParams } = req.query;
   const TMDB_API_KEY = process.env.TMDB_API_KEY;
 
   if (!path) {
-    return new Response(JSON.stringify({ error: "Missing 'path' parameter" }), {
-      status: 400,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return res.status(400).json({ error: "Missing 'path' parameter" });
   }
 
-  // Remove 'path' from params and append api_key
-  urlParams.delete('path');
-  urlParams.append('api_key', TMDB_API_KEY);
+  // Build the TMDB URL
+  const searchParams = new URLSearchParams({
+    ...queryParams,
+    api_key: TMDB_API_KEY
+  });
   
-  const url = `https://api.themoviedb.org/3/${path}?${urlParams.toString()}`;
+  const url = `https://api.themoviedb.org/3/${path}?${searchParams.toString()}`;
 
-  // Cache Logic
+  // TWEAK: Better Cache Logic (discover/ added)
   let cacheSeconds = 3600; // Default: 1 hour
   if (path.includes('trending') || path.includes('popular') || path.includes('discover')) {
     cacheSeconds = 86400; // 1 DAY for Home Screen & Categories
@@ -26,22 +24,15 @@ export default async function handler(req) {
     cacheSeconds = 604800; // 1 WEEK for Details
   }
 
+  // TWEAK: Proper Cache-Control string with public and stale-while-revalidate values
+  res.setHeader('Cache-Control', `public, s-maxage=${cacheSeconds}, stale-while-revalidate=86400`);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
   try {
     const response = await fetch(url);
     const data = await response.json();
-    
-    return new Response(JSON.stringify(data), {
-      status: response.status,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': `public, s-maxage=${cacheSeconds}, stale-while-revalidate=86400`
-      }
-    });
+    res.status(response.status).json(data);
   } catch (error) {
-    return new Response(JSON.stringify({ error: "Internal Server Error" }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    res.status(500).json({ error: "Internal Server Error" });
   }
 }
