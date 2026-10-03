@@ -1,38 +1,47 @@
-const fetch = require('node-fetch');
+export const runtime = 'edge';
 
-export default async function handler(req, res) {
-  const { path, ...queryParams } = req.query;
+export default async function handler(req) {
+  const urlParams = new URL(req.url).searchParams;
+  const path = urlParams.get('path');
   const TMDB_API_KEY = process.env.TMDB_API_KEY;
 
   if (!path) {
-    return res.status(400).json({ error: "Missing 'path' parameter" });
+    return new Response(JSON.stringify({ error: "Missing 'path' parameter" }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
-  // Build the TMDB URL
-  const searchParams = new URLSearchParams({
-    ...queryParams,
-    api_key: TMDB_API_KEY
-  });
+  // Remove 'path' from params and append api_key
+  urlParams.delete('path');
+  urlParams.append('api_key', TMDB_API_KEY);
   
-  const url = `https://api.themoviedb.org/3/${path}?${searchParams.toString()}`;
+  const url = `https://api.themoviedb.org/3/${path}?${urlParams.toString()}`;
 
-  // CACHING LOGIC for 1,000 users
+  // Cache Logic
   let cacheSeconds = 3600; // Default: 1 hour
-  if (path.includes('trending') || path.includes('popular')) {
-    cacheSeconds = 86400; // 1 DAY for Home Screen
+  if (path.includes('trending') || path.includes('popular') || path.includes('discover')) {
+    cacheSeconds = 86400; // 1 DAY for Home Screen & Categories
   } else if (path.includes('movie/') || path.includes('tv/')) {
     cacheSeconds = 604800; // 1 WEEK for Details
   }
 
-  // Set the Cache headers
-  res.setHeader('Cache-Control', `s-maxage=${cacheSeconds}, stale-while-revalidate`);
-  res.setHeader('Access-Control-Allow-Origin', '*'); // Allow your app to call it
-
   try {
     const response = await fetch(url);
     const data = await response.json();
-    res.status(response.status).json(data);
+    
+    return new Response(JSON.stringify(data), {
+      status: response.status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': `public, s-maxage=${cacheSeconds}, stale-while-revalidate=86400`
+      }
+    });
   } catch (error) {
-    res.status(500).json({ error: "Internal Server Error" });
+    return new Response(JSON.stringify({ error: "Internal Server Error" }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }
